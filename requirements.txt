@@ -1,0 +1,6 @@
+python-decouple
+mercantile
+opencv-python
+rasterio
+requests
+tqdm
