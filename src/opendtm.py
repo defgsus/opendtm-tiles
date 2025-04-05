@@ -13,7 +13,8 @@ import rasterio
 import rasterio.windows
 
 from . import config
-from ._download import streaming_download
+from .download import streaming_download
+from .files import DeleteFileOnException, PathConfig
 
 
 class OpenDTM:
@@ -32,13 +33,13 @@ class OpenDTM:
 
     def __init__(
             self,
+            pathconfig: PathConfig = PathConfig(),
             download: bool = False,
             verbose: bool = True,
             cache_dtype: np.dtype = np.float32,
     ):
         self.srid = 25832
-        self.web_cache_path = config.OPENDTM_WEB_CACHE_PATH
-        self.tile_cache_path = config.OPENDTM_TILE_CACHE_PATH
+        self.pathconfig = pathconfig
         self.verbose = verbose
         self.cache_dtype = cache_dtype
         self._download = download
@@ -69,13 +70,12 @@ class OpenDTM:
         if sector not in self.AVAILABLE_SECTORS:
             raise ValueError(f"Sector {sector} does not exist")
 
-        filename_part = f"E{sector[0]}N{sector[1]}"
-        cache_filename = self.web_cache_path / f"{filename_part}.zip"
+        cache_filename = self.pathconfig.web_cache_file(*sector, extension=".zip")
         if cache_filename.exists():
             return
 
         streaming_download(
-            url=f"https://openmaps.online/dtm_ger_download/{filename_part}.zip",
+            url=f"https://openmaps.online/dtm_ger_download/E{sector[0]}N{sector[1]}.zip",
             local_filename=cache_filename,
             verbose=self.verbose,
         )
@@ -85,8 +85,8 @@ class OpenDTM:
             raise ValueError(f"Sector {sector} does not exist")
 
         filename_part = f"E{sector[0]}N{sector[1]}"
-        cache_zip_filename = self.web_cache_path / f"{filename_part}.zip"
-        sector_filename = self.sector_filename(sector)
+        cache_zip_filename = self.pathconfig.web_cache_file(*sector, extension=".zip")
+        sector_filename = self.pathconfig.web_cache_file(*sector)
         if not sector_filename.exists():
             if not cache_zip_filename.exists():
                 if self._download:
@@ -97,7 +97,8 @@ class OpenDTM:
             with zipfile.ZipFile(cache_zip_filename) as zf:
                 possible_names = (
                     f"{filename_part}.tif",
-                    f"{filename_part}/{filename_part}.tif"
+                    f"{filename_part}/{filename_part}.tif",
+                    f"{filename_part}/{filename_part}_ok.tif",
                 )
                 tif_filename = None
                 for possible_name in possible_names:
@@ -114,21 +115,19 @@ class OpenDTM:
                 self._log(f"Extracting {filename_part}")
                 with zf.open(tif_filename) as fp_src:
                     os.makedirs(sector_filename.parent, exist_ok=True)
-                    with sector_filename.open("wb") as fp_dst:
-                        while True:
-                            data = fp_src.read(2**20)
-                            if data:
-                                fp_dst.write(data)
-                            else:
-                                break
-
-    def sector_filename(self, sector: Sector) -> Path:
-        return self.tile_cache_path / f"E{sector[0]}N{sector[1]}.tif"
+                    with DeleteFileOnException(sector_filename):
+                        with sector_filename.open("wb") as fp_dst:
+                            while True:
+                                data = fp_src.read(2**20)
+                                if data:
+                                    fp_dst.write(data)
+                                else:
+                                    break
 
     def open_sector(self, sector: Sector) -> rasterio.DatasetReader:
         if sector not in self.AVAILABLE_SECTORS:
             raise ValueError(f"Sector {sector} does not exist")
-        filename = self.sector_filename(sector)
+        filename = self.pathconfig.web_cache_file(*sector)
         if not filename.exists():
             if self._download:
                 self.extract_sector(sector)

@@ -1,5 +1,8 @@
-.env
+*.png
+cache/
+tiles/
 
+.env
 env/
 venv/
 .DS_Store

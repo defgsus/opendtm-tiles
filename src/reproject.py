@@ -1,4 +1,5 @@
 import os
+import warnings
 from typing import List, Tuple
 
 from tqdm import tqdm
@@ -11,6 +12,7 @@ import cv2
 
 from .opendtm import OpenDTM
 from . import config
+from .files import DeleteFileOnException
 
 
 # opendem's opendtm sectors are in
@@ -61,24 +63,25 @@ def command_reproject(
 ):
     dtm = OpenDTM(verbose=verbose)
 
-    for sector in tqdm(dtm.available_sectors(sectors), desc="sectors", disable=not verbose):
+    available_sectors = dtm.available_sectors(sectors)
+    if not available_sectors:
+        warnings.warn("No sectors found in cache")
+
+    for sector in tqdm(available_sectors, desc="sectors", disable=not verbose):
         with dtm.open_sector(sector) as ds:
             bounds_4326 = rasterio.warp.transform_bounds(src_crs, crs_4326, *ds.bounds)
             tiles = list(mercantile.tiles(*bounds_4326, zooms=zoom))
-            #tiles = special_tiles
+
             transformer = rasterio.transform.AffineTransformer(
                 # the sectors seem to be a little too small??
                 ds.transform * rasterio.Affine.scale(40_000/39_995)
             )
             for tile in tqdm(tiles, position=1, desc="tiles", disable=not verbose):
                 tile_bounds_3857 = mercantile.xy_bounds(*tile)
-                bl = transform_coord(crs_3857, src_crs, tile_bounds_3857[0], tile_bounds_3857[3])
-                br = transform_coord(crs_3857, src_crs, tile_bounds_3857[2], tile_bounds_3857[3])
-                tl = transform_coord(crs_3857, src_crs, tile_bounds_3857[0], tile_bounds_3857[1])
-                tr = transform_coord(crs_3857, src_crs, tile_bounds_3857[2], tile_bounds_3857[1])
-                #poly = util.extent_to_geos_polygon(tile_bounds_3857, srid=3857)
-                #poly.transform(25832)
-                #bl, tl, tr, br, _ = poly.coords[0]
+                bl = transform_coord(crs_3857, src_crs, tile_bounds_3857[0], tile_bounds_3857[1])
+                br = transform_coord(crs_3857, src_crs, tile_bounds_3857[2], tile_bounds_3857[1])
+                tl = transform_coord(crs_3857, src_crs, tile_bounds_3857[0], tile_bounds_3857[3])
+                tr = transform_coord(crs_3857, src_crs, tile_bounds_3857[2], tile_bounds_3857[3])
 
                 ptl, pbl, pbr, ptr = (transformer.rowcol(*c)[::-1] for c in (bl, tl, tr, br))
                 p_extent = (
@@ -125,4 +128,6 @@ def sample_tile(tile: mercantile.Tile, array: np.ndarray):
         sampler[vmask] = array[vmask]
 
     os.makedirs(filename.parent, exist_ok=True)
-    np.savez_compressed(filename, sampler)
+    with DeleteFileOnException(filename.with_suffix(".npz")):
+        np.savez_compressed(filename, sampler)
+

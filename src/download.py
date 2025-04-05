@@ -46,5 +46,6 @@ def streaming_download(
 
         except:
             # don't leave half files
-            os.remove(str(local_filename))
+            if local_filename.exists():
+                os.remove(local_filename)
             raise

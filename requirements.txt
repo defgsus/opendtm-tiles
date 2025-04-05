@@ -1,6 +1,7 @@
 python-decouple
 mercantile
 opencv-python
+pillow
 rasterio
 requests
 tqdm
