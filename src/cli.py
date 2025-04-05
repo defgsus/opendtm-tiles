@@ -7,7 +7,7 @@ from src import config
 from src.opendtm import OpenDTM
 from src.files import PathConfig
 from src.reproject import command_reproject, command_show_resolution
-from src.preview import command_reproject_preview
+from src.preview import command_reproject_preview, command_normal_map_preview
 from src.normalmap import command_normal_map
 
 
@@ -19,7 +19,7 @@ def parse_args() -> dict:
     main_parser.add_argument("-q", "--quite", type=bool, nargs="?", default=False, const=True)
 
     main_parser.add_argument("-wc", "--web-cache-path", type=str, default=pathconfig.web_cache_path)
-    main_parser.add_argument("-tc", "--tile-cache-path", type=str, default=pathconfig.tile_cache_path)
+    main_parser.add_argument("-tc", "--tile-cache-path", type=str, default=pathconfig.tile_cache_path())
 
     subparsers = main_parser.add_subparsers()
 
@@ -33,7 +33,6 @@ def parse_args() -> dict:
             help=f"Sector north->south extent to consider, default is {config.OPENDTM_SECTOR_Y}",
         )
 
-
     parser = subparsers.add_parser("cache")
     parser.set_defaults(command="cache")
     _add_sector_args(parser)
@@ -43,16 +42,31 @@ def parse_args() -> dict:
     _add_sector_args(parser)
     parser.add_argument("-r", "--resolution", type=int, default=256)
     parser.add_argument("-z", "--zoom", type=int, default=10)
+    parser.add_argument(
+        "-R", "--reset", type=bool, nargs="?", default=False, const=True,
+        help="Delete the tile cache directory for that zoom level before sampling reprojections",
+    )
 
     parser = subparsers.add_parser("normal-map")
     parser.set_defaults(command="normal_map")
     parser.add_argument("-z", "--zoom", type=int, default=10)
+    parser.add_argument("-tcs", "--tile-cache-size", type=int, default=1)
+    parser.add_argument("-ecs", "--edge-cache-size", type=int, default=10_000)
+    parser.add_argument(
+        "-a", "--approximate", type=bool, nargs="?", default=False, const=True,
+        help="Approximate edges instead of loading the tiles",
+    )
+    parser.add_argument(
+        "-O", "--overwrite", type=bool, nargs="?", default=False, const=True,
+        help="Overwrite existing normal map tiles",
+    )
 
-    parser = subparsers.add_parser("reproject-preview")
-    parser.set_defaults(command="reproject_preview")
-    parser.add_argument("-z", "--zoom", type=int, default=10)
-    parser.add_argument("-r", "--resolution", type=int, default=None, help="resolution per tile in preview")
-    parser.add_argument("-p", "--padding", type=int, default=1, help="padding between tiles")
+    for preview_type in ("reproject", "normal_map"):
+        parser = subparsers.add_parser(f"{preview_type.replace('_', '-')}-preview")
+        parser.set_defaults(command=f"{preview_type}_preview")
+        parser.add_argument("-z", "--zoom", type=int, default=10)
+        parser.add_argument("-r", "--resolution", type=int, default=None, help="resolution per tile in preview")
+        parser.add_argument("-p", "--padding", type=int, default=1, help="padding between tiles")
 
     parser = subparsers.add_parser("show-paths")
     parser.set_defaults(command="show_paths")
@@ -111,7 +125,8 @@ def command_cache(
 
 def command_show_paths(pathconfig: PathConfig, **kwargs):
     print(f"web-cache:  {pathconfig.web_cache_path}")
-    print(f"tile-cache: {pathconfig.tile_cache_path}")
+    print(f"tile-cache: {pathconfig.tile_cache_path(normal=False)}")
+    print(f"            {pathconfig.tile_cache_path(normal=True)}")
 
 
 if __name__ == "__main__":

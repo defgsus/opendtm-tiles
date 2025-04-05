@@ -18,7 +18,42 @@ def command_reproject_preview(
         padding: int,
         verbose: bool,
 ):
-    tiles_map = pathconfig.tile_cache_file_map(zoom=zoom)
+    _reproject_preview(
+        normal=False,
+        pathconfig=pathconfig,
+        zoom=zoom,
+        resolution=resolution,
+        padding=padding,
+        verbose=verbose,
+    )
+
+
+def command_normal_map_preview(
+        pathconfig: PathConfig,
+        zoom: int,
+        resolution: Optional[int],
+        padding: int,
+        verbose: bool,
+):
+    _reproject_preview(
+        normal=True,
+        pathconfig=pathconfig,
+        zoom=zoom,
+        resolution=resolution,
+        padding=padding,
+        verbose=verbose,
+    )
+
+
+def _reproject_preview(
+        normal: bool,
+        pathconfig: PathConfig,
+        zoom: int,
+        resolution: Optional[int],
+        padding: int,
+        verbose: bool,
+):
+    tiles_map = pathconfig.tile_cache_file_map(zoom=zoom, normal=normal)
 
     min_x = min(t[0] for t in tiles_map)
     min_y = min(t[1] for t in tiles_map)
@@ -33,13 +68,14 @@ def command_reproject_preview(
 
         data = np.load(filename).get("arr_0")
         if resolution is None:
-            resolution = data[0]
+            resolution = data.shape[0]
         if array is None:
             array = np.zeros((
                 (max_y - min_y + 1) * (resolution + padding),
                 (max_x - min_x + 1) * (resolution + padding),
                 *data.shape[2:]
             ))
+            array -= 10_000.
 
         if small_res is not None:
             data = cv2.resize(data, (small_res, small_res), cv2.INTER_NEAREST)
@@ -48,7 +84,21 @@ def command_reproject_preview(
             x * (resolution + padding): x * (resolution + padding) + resolution
         ] = data
 
+    nan_mask = np.isnan(array) | (array <= -10_000)
+    if nan_mask.ndim == 3:
+        nan_mask = nan_mask[..., 0]
+    array[nan_mask] = -1 if normal else 0
+
+    if normal:
+        array = array * .5 + .5
+        array = np.pad(array, ((0, 0), (0, 0), (0, 1)))
+    else:
+        array /= 2000  # TODO: get max height in dataset
+        array = array[..., None].repeat(4, -1)
+
+    array[..., 3] = 1. - nan_mask
+
     image = PIL.Image.fromarray(
-        (array[..., None].repeat(3, -1) / 4).clip(0, 255).astype(np.uint8)
+        (array * 255).clip(0, 255).astype(np.uint8)
     )
-    image.save(f"reproject-preview-z{zoom}-r{resolution}.png")
+    image.save(f"{'normal' if normal else 'reproject'}-preview-z{zoom}-r{resolution}-p{padding}.png")

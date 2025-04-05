@@ -1,4 +1,5 @@
 import os
+import shutil
 import warnings
 from typing import List, Tuple
 
@@ -12,8 +13,7 @@ import cv2
 
 from .opendtm import OpenDTM
 from . import config
-from .files import DeleteFileOnException
-
+from .files import DeleteFileOnException, PathConfig
 
 # opendem's opendtm sectors are in
 src_crs = rasterio.crs.CRS.from_epsg(25832)
@@ -56,16 +56,23 @@ def transform_coord(src_crs: rasterio.crs.CRS, dst_crs: rasterio.crs.CRS, x: flo
 
 
 def command_reproject(
+        pathconfig: PathConfig,
         sectors: List[Tuple[int, int]],
         zoom: int,
         resolution: int,
+        reset: bool,
         verbose: bool,
 ):
-    dtm = OpenDTM(verbose=verbose)
+    dtm = OpenDTM(pathconfig=pathconfig, verbose=verbose)
 
     available_sectors = dtm.available_sectors(sectors)
     if not available_sectors:
         warnings.warn("No sectors found in cache")
+
+    if reset:
+        path = pathconfig.tile_cache_path() / str(zoom)
+        if path.exists():
+            shutil.rmtree(path)
 
     for sector in tqdm(available_sectors, desc="sectors", disable=not verbose):
         with dtm.open_sector(sector) as ds:
@@ -92,42 +99,46 @@ def command_reproject(
                 )
                 window = rasterio.windows.Window(col_off=p_extent[0], row_off=p_extent[1], width=p_extent[2]-p_extent[0], height=p_extent[3]-p_extent[1]+1)
                 data = ds.read(1, window=window, boundless=True, fill_value=np.nan)
-                # print(data.shape[::-1])
+
                 vmask = ~np.isnan(data) & (data != -32768)
                 if np.all(~vmask):
                     continue
-                # print(data[vmask].min(), data[vmask].max())
+
                 data[~vmask] = np.nan
-                if 1:
-                    l, b, r, t = p_extent
-                    src = np.float32([[pbl[0]-l, pbl[1]-b], [pbr[0]-l, pbr[1]-b], [ptl[0]-l, ptl[1]-b], [ptr[0]-l, ptr[1]-b]])
-                    dst = np.float32([[0, 0], [r - l + 10, 0], [0, t - b + 1], [r - l + 1, t - b]])
-                    src *= [[data.shape[1] / window.width , data.shape[0] / window.height]]
-                    dst *= [[data.shape[1] / window.width , data.shape[0] / window.height]]
-                    #print(src)
-                    mat = cv2.getPerspectiveTransform(src=src, dst=dst)
-                    data = cv2.warpPerspective(
-                        data, mat, (data.shape[1], data.shape[0]),
-                        flags=cv2.INTER_CUBIC,
-                    )
-                    #vmask = data[..., 1]#.astype(np.bool)
-                    #data = data[..., 0]
+
+                l, b, r, t = p_extent
+                src = np.float32([[pbl[0]-l, pbl[1]-b], [pbr[0]-l, pbr[1]-b], [ptl[0]-l, ptl[1]-b], [ptr[0]-l, ptr[1]-b]])
+                dst = np.float32([[0, 0], [r - l + 10, 0], [0, t - b + 1], [r - l + 1, t - b]])
+                src *= [[data.shape[1] / window.width , data.shape[0] / window.height]]
+                dst *= [[data.shape[1] / window.width , data.shape[0] / window.height]]
+
+                mat = cv2.getPerspectiveTransform(src=src, dst=dst)
+                data = cv2.warpPerspective(
+                    data, mat, (data.shape[1], data.shape[0]),
+                    flags=cv2.INTER_CUBIC,
+                )
+
                 data = cv2.resize(data, (resolution, resolution))
 
-                sample_tile(tile, data)
+                sample_tile(pathconfig, tile, data)
 
 
-def sample_tile(tile: mercantile.Tile, array: np.ndarray):
-    filename = config.OPENDTM_TILE_CACHE_PATH / f"{tile.z}/{tile.x}/{tile.y}"
-    if not filename.with_suffix(".npz").exists():
+def sample_tile(pathconfig: PathConfig, tile: mercantile.Tile, array: np.ndarray):
+    filename = pathconfig.tile_cache_filename(tile.z, tile.x, tile.y)
+    if not filename.exists():
         sampler = array
     else:
-        sampler = np.load(filename.with_suffix(".npz")).get("arr_0")
+        sampler = np.load(filename).get("arr_0")
+        if sampler.shape != array.shape:
+            raise ValueError(
+                f"The reprojection samplers have shape {sampler.shape} and reprojected"
+                f" tiles have shape {array.shape}. Use --reset to delete the previous samplers"
+            )
 
         vmask = ~np.isnan(array)
         sampler[vmask] = array[vmask]
 
     os.makedirs(filename.parent, exist_ok=True)
-    with DeleteFileOnException(filename.with_suffix(".npz")):
+    with DeleteFileOnException(filename):
         np.savez_compressed(filename, sampler)
 

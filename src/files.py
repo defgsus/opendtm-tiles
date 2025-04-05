@@ -9,19 +9,22 @@ class PathConfig:
 
     def __init__(self, **kwargs):
         self.web_cache_path = Path(kwargs.get("web_cache_path", config.OPENDTM_WEB_CACHE_PATH))
-        self.tile_cache_path = Path(kwargs.get("tile_cache_path", config.OPENDTM_TILE_CACHE_PATH))
+        self._tile_cache_path = Path(kwargs.get("tile_cache_path", config.OPENDTM_TILE_CACHE_PATH))
 
     def web_cache_file(self, sector_x: int, sector_y: int, extension: str = ".tif"):
-        return self.web_cache_path / f"E{sector_x}N{sector_y}{extension}"
+        return self.web_cache_path / f"{extension[1:]}/E{sector_x}N{sector_y}{extension}"
 
-    def tile_cache_filename(self, z: int, x: int, y: int, normal: bool = False):
-        normal = "" if not normal else "normal/"
-        return self.tile_cache_path / f"{normal}{z}/{x}/{y}.npz"
-
-    def tile_cache_file_map(self, zoom: int, normal: bool = False):
-        path = self.tile_cache_path
+    def tile_cache_path(self, normal: bool = False) -> Path:
+        path = self._tile_cache_path
         if normal:
             path = path / "normal"
+        return path
+
+    def tile_cache_filename(self, z: int, x: int, y: int, normal: bool = False):
+        return self.tile_cache_path(normal=normal) / f"{z}/{x}/{y}.npz"
+
+    def tile_cache_file_map(self, zoom: int, normal: bool = False):
+        path = self.tile_cache_path(normal=normal)
         return get_tile_file_map(path, zoom, ".npz")
 
 

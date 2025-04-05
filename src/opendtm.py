@@ -56,7 +56,7 @@ class OpenDTM:
             sectors = [s for s in sectors if s in self.AVAILABLE_SECTORS]
         return [
             s for s in sectors
-            if self.sector_filename(s).exists()
+            if self.pathconfig.web_cache_file(*s).exists()
         ]
 
     def sector_at(self, e: float, n: float) -> Optional[Sector]:
