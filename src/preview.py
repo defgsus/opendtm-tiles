@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import List, Tuple, Optional
 
 from tqdm import tqdm
@@ -8,57 +9,34 @@ import PIL.Image
 
 from .opendtm import OpenDTM
 from . import config
-from .files import PathConfig
+from .files import PathConfig, DeleteFileOnException
 
 
-def command_reproject_preview(
+def command_preview(
         pathconfig: PathConfig,
+        modality: str,
         zoom: int,
         resolution: Optional[int],
         padding: int,
+        numbers: bool,
         verbose: bool,
 ):
-    _reproject_preview(
-        normal=False,
-        pathconfig=pathconfig,
-        zoom=zoom,
-        resolution=resolution,
-        padding=padding,
-        verbose=verbose,
-    )
+    tiles_map = pathconfig.tile_cache_file_map(zoom=zoom, modality=modality)
 
-
-def command_normal_map_preview(
-        pathconfig: PathConfig,
-        zoom: int,
-        resolution: Optional[int],
-        padding: int,
-        verbose: bool,
-):
-    _reproject_preview(
-        normal=True,
-        pathconfig=pathconfig,
-        zoom=zoom,
-        resolution=resolution,
-        padding=padding,
-        verbose=verbose,
-    )
-
-
-def _reproject_preview(
-        normal: bool,
-        pathconfig: PathConfig,
-        zoom: int,
-        resolution: Optional[int],
-        padding: int,
-        verbose: bool,
-):
-    tiles_map = pathconfig.tile_cache_file_map(zoom=zoom, normal=normal)
+    if not tiles_map:
+        print(f"No tiles at {pathconfig.tile_cache_path(modality=modality)}/{zoom}")
+        return
 
     min_x = min(t[0] for t in tiles_map)
     min_y = min(t[1] for t in tiles_map)
     max_x = max(t[0] for t in tiles_map)
     max_y = max(t[1] for t in tiles_map)
+
+    if numbers:
+        print(f"z={zoom}")
+        print(f"x={(min_x, max_x)} width={max_x - min_x}")
+        print(f"y={(min_y, max_y)} height={max_y - min_y}")
+        return
 
     array = None
     small_res = resolution
@@ -66,7 +44,14 @@ def _reproject_preview(
         x = x - min_x
         y = y - min_y
 
-        data = np.load(filename).get("arr_0")
+        try:
+            data = np.load(filename).get("arr_0")
+        except:
+            if resolution is None:
+                raise
+            data = np.zeros((resolution, resolution, *array.shape[2:]))
+            if data.ndim == 3:
+                data[..., 0] = 1
         if resolution is None:
             resolution = data.shape[0]
         if array is None:
@@ -87,9 +72,9 @@ def _reproject_preview(
     nan_mask = np.isnan(array) | (array <= -10_000)
     if nan_mask.ndim == 3:
         nan_mask = nan_mask[..., 0]
-    array[nan_mask] = -1 if normal else 0
+    array[nan_mask] = -1 if modality == "normal" else 0
 
-    if normal:
+    if modality == "normal":
         array = array * .5 + .5
         array = np.pad(array, ((0, 0), (0, 0), (0, 1)))
     else:
@@ -101,4 +86,12 @@ def _reproject_preview(
     image = PIL.Image.fromarray(
         (array * 255).clip(0, 255).astype(np.uint8)
     )
-    image.save(f"{'normal' if normal else 'reproject'}-preview-z{zoom}-r{resolution}-p{padding}.png")
+    filename = Path(
+        f"preview/{modality}-preview-z{zoom}-r{resolution}-p{padding}.png"
+    ).resolve()
+    os.makedirs(filename.parent, exist_ok=True)
+    with DeleteFileOnException(filename):
+        image.save(filename)
+    if verbose:
+        print(f"file://{filename}")
+

@@ -5,13 +5,41 @@ collected from open data of each federal state.
 
 The resolution is pretty good (1 pixel ~= 1m²) and this leads to a couple of challenges.
 
-This is my approach to resample them to web-mercator at the highest possible resolution and
-also calculate the normal map to allow lighting/shading in a WebGL viewer.
+There are 281 GeoTiff files, each at ~40,000² pixels, each compressed inside a zip.
+
+Downloading all zips requires: 820 GB
+
+Extracting those zips requires: 1.6 TB 
+
+Reprojecting it to web-mercator map tiles and calculating normal maps requires another 3 Tb (estimated)
+
+Here's the map of all provided sectors in EPSG:25832 projection. The opaqueness reflects the 
+file size of each zip file, ranging between 7 MB and 5 GB. The red grid shows the position of 
+web-mercator map tiles at zoom level 10.
+
+![open-dtm tiles in 25832 projection](imgs/germany-dtm-tiles-25832.png)
+
+Here's the same map in web-mercator projection (EPSG:3857):
+
+![open-dtm tiles in 3857 projection](imgs/germany-dtm-tiles-3857.png)
 
 
-```shell
-python src/cli.py reproject -z 13 -r 3600
-```
+For another impression of the size of this dataset, look at this 1024² downsampled version of sector E680N5600.
+The small rectangle is cropped below at highest resolution and a normal-map is calculated to enhance the
+visibility of details.
+
+![full sector](imgs/E680N5600.png)
+
+![cropped slice of sector at full resolution](imgs/E680N5600-crop-normal.png)
+
+
+## Current approach
+
+I want to reproject the 40,000² DTM sectors into typical web-mercator tiles at 256². 
+To gain maximum resolution, the window size inside the DTM sector should be approximately 256².
+
+Below is a list of map-tile resolutions that would result for different zoom levels.
+The resolutions are minimum and maximum, since tile resolutions are a little different for each DTM sector.
 
     zoom  1: 13,831,678 x 19,995,929 - 13,831,678 x 19,995,929
     zoom  2: 16,817,554 x 9,564,058  - 16,817,554 x 9,564,058
@@ -33,3 +61,11 @@ python src/cli.py reproject -z 13 -r 3600
     zoom 18:         91 x 91         -        110 x 110
     zoom 19:         45 x 45         -         55 x 55
     zoom 20:         22 x 22         -         27 x 27
+
+Seems like it would be worth the trouble to go up to zoom level 17.
+
+
+TODO: 
+
+- a gap in normal map at about 20/557441/351617, for reproject:13@3600²
+- alignment with map is not correct in the lower-right area of the OpenDTM slices

@@ -12,5 +12,9 @@ OPENDTM_TILE_CACHE_PATH = Path(
     decouple.config("OPENDTM_TILE_CACHE_PATH", PROJECT_PATH / "cache" / "tiles")
 )
 
+OPENDTM_TILE_OUTPUT_PATH = Path(
+    decouple.config("OPENDTM_TILE_OUTPUT_PATH", PROJECT_PATH / "tiles")
+)
+
 OPENDTM_SECTOR_X = [int(i) for i in decouple.config("OPENDTM_SECTOR_X", "280 880").split()]
 OPENDTM_SECTOR_Y = [int(i) for i in decouple.config("OPENDTM_SECTOR_Y", "5200 6080").split()]

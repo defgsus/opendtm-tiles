@@ -1,6 +1,7 @@
 *.png
 cache/
 tiles/
+preview/
 
 .env
 env/

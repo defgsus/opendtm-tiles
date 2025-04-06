@@ -78,6 +78,12 @@ def command_reproject(
         with dtm.open_sector(sector) as ds:
             bounds_4326 = rasterio.warp.transform_bounds(src_crs, crs_4326, *ds.bounds)
             tiles = list(mercantile.tiles(*bounds_4326, zooms=zoom))
+            if pathconfig.tile_range_x:
+                tiles = [tile for tile in tiles if pathconfig.tile_range_x[0] <= tile.x <= pathconfig.tile_range_x[1]]
+            if pathconfig.tile_range_y:
+                tiles = [tile for tile in tiles if pathconfig.tile_range_y[0] <= tile.y <= pathconfig.tile_range_y[1]]
+            if not tiles:
+                continue
 
             transformer = rasterio.transform.AffineTransformer(
                 # the sectors seem to be a little too small??
@@ -124,11 +130,10 @@ def command_reproject(
 
 
 def sample_tile(pathconfig: PathConfig, tile: mercantile.Tile, array: np.ndarray):
-    filename = pathconfig.tile_cache_filename(tile.z, tile.x, tile.y)
-    if not filename.exists():
+    if not pathconfig.tile_cache_file_exists(tile.z, tile.x, tile.y):
         sampler = array
     else:
-        sampler = np.load(filename).get("arr_0")
+        sampler = pathconfig.load_tile_cache_file(tile.z, tile.x, tile.y)
         if sampler.shape != array.shape:
             raise ValueError(
                 f"The reprojection samplers have shape {sampler.shape} and reprojected"
@@ -138,7 +143,5 @@ def sample_tile(pathconfig: PathConfig, tile: mercantile.Tile, array: np.ndarray
         vmask = ~np.isnan(array)
         sampler[vmask] = array[vmask]
 
-    os.makedirs(filename.parent, exist_ok=True)
-    with DeleteFileOnException(filename):
-        np.savez_compressed(filename, sampler)
+    pathconfig.save_tile_cache_file(tile.z, tile.x, tile.y, sampler)
 
