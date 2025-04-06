@@ -18,9 +18,10 @@ def command_render(
         pathconfig: PathConfig,
         modality: str,
         cache_zoom: int,
-        tile_zoom: int,
+        tile_zoom: Optional[int],
         resolution: Optional[int],
         workers: int,
+        overwrite: bool,
         verbose: bool,
 ):
     kwargs = dict(
@@ -29,6 +30,7 @@ def command_render(
         cache_zoom=cache_zoom,
         tile_zoom=tile_zoom,
         resolution=resolution,
+        overwrite=overwrite,
         verbose=verbose,
     )
     tiles_map = pathconfig.tile_cache_file_map(zoom=cache_zoom, modality=modality)
@@ -59,12 +61,16 @@ def _render_tiles(
         modality: str,
         pathconfig: PathConfig,
         cache_zoom: int,
-        tile_zoom: int,
+        tile_zoom: Optional[int],
         resolution: Optional[int],
+        overwrite: bool,
         verbose: bool,
         interpolation: int = cv2.INTER_CUBIC,
         tqdm_position: int = 0,
 ):
+    if tile_zoom is None:
+        tile_zoom = cache_zoom
+
     progress = tqdm(tiles_map.items(), desc="tiles", disable=not verbose, position=tqdm_position)
 
     def _iter_tiles(resolution: Optional[int]):
@@ -107,13 +113,27 @@ def _render_tiles(
                             (slice(sy * sh, (sy + 1) * sh), slice(sx * sw, (sx + 1) * sw)),
                          ))
 
-            do_it = False
-            for tile, (slice_y, slice_x) in tiles_and_slices:
-                if not pathconfig.output_tile_exists(tile.z, tile.x, tile.y, modality=modality):
-                    do_it = True
-                    break
+            do_it = overwrite
+            if not do_it:
+                for tile, (slice_y, slice_x) in tiles_and_slices:
+                    if not pathconfig.tile_output_exists(tile.z, tile.x, tile.y, modality=modality):
+                        do_it = True
+                        break
 
             if do_it:
+                if pathconfig.tile_range_x:
+                    tiles_and_slices = [
+                        (tile, slices)
+                        for tile, slices in tiles_and_slices
+                        if pathconfig.tile_range_x[0] <= tile.x <= pathconfig.tile_range_x[1]
+                    ]
+                if pathconfig.tile_range_y:
+                    tiles_and_slices = [
+                        (tile, slices)
+                        for tile, slices in tiles_and_slices
+                        if pathconfig.tile_range_y[0] <= tile.y <= pathconfig.tile_range_y[1]
+                    ]
+
                 if data is None:
                     try:
                         data = pathconfig.load_tile_cache_file(cache_zoom, x, y, modality=modality)
@@ -132,9 +152,13 @@ def _render_tiles(
                             interpolation,
                         )
                     yield source_tile, tile, data_slice
-    
+
+    num_skipped = 0
     for source_tile, tile, array in _iter_tiles(resolution):
-        if pathconfig.output_tile_exists(tile.z, tile.x, tile.y, modality=modality):
+
+        if not overwrite and pathconfig.tile_output_exists(tile.z, tile.x, tile.y, modality=modality):
+            num_skipped += 1
+            progress.set_postfix({"num_skipped": num_skipped})
             continue
 
         array2d = array
@@ -143,6 +167,7 @@ def _render_tiles(
         nan_mask = np.isnan(array2d) | (array2d <= -10_000)
 
         progress.set_postfix({
+            "num_skipped": num_skipped,
             "tile": f"{source_tile.z}/{source_tile.x}/{source_tile.y}->{tile.z}/{tile.x}/{tile.y}",
             "filled": f"{round(float((1.-nan_mask.mean())*100), 1)}%",
         })

@@ -114,17 +114,17 @@ def command_reproject(
 
                 l, b, r, t = p_extent
                 src = np.float32([[pbl[0]-l, pbl[1]-b], [pbr[0]-l, pbr[1]-b], [ptl[0]-l, ptl[1]-b], [ptr[0]-l, ptr[1]-b]])
-                dst = np.float32([[0, 0], [r - l + 10, 0], [0, t - b + 1], [r - l + 1, t - b]])
+                dst = np.float32([[0, 0], [r - l, 0], [0, t - b + 1], [r - l + 1, t - b]])
                 src *= [[data.shape[1] / window.width , data.shape[0] / window.height]]
                 dst *= [[data.shape[1] / window.width , data.shape[0] / window.height]]
 
                 mat = cv2.getPerspectiveTransform(src=src, dst=dst)
                 data = cv2.warpPerspective(
                     data, mat, (data.shape[1], data.shape[0]),
-                    flags=cv2.INTER_CUBIC,
+                    flags=cv2.INTER_NEAREST,
                 )
 
-                data = cv2.resize(data, (resolution, resolution))
+                data = cv2.resize(data, (resolution, resolution), cv2.INTER_CUBIC)
 
                 sample_tile(pathconfig, tile, data)
 

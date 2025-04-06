@@ -111,11 +111,16 @@ def parse_args() -> dict:
     )
     parser.set_defaults(command="render")
     _add_modality(parser)
-    parser.add_argument("-cz", "--cache-zoom", type=int, default=10)
-    parser.add_argument("-tz", "--tile-zoom", type=int, default=10)
+    _add_tile_args(parser)
+    parser.add_argument("-z", "--cache-zoom", type=int, default=10)
+    parser.add_argument("-tz", "--tile-zoom", type=int, default=None)
     parser.add_argument("-r", "--resolution", type=int, default=None, help="resolution per tile in tile-zoom")
     parser.add_argument("-j", "--workers", type=int, default=1)
     _add_random_order(parser)
+    parser.add_argument(
+        "-O", "--overwrite", type=bool, nargs="?", default=False, const=True,
+        help="Overwrite existing rendered tiles",
+    )
 
     parser = subparsers.add_parser("downsample")
     parser.set_defaults(command="downsample")
@@ -126,6 +131,10 @@ def parse_args() -> dict:
     )
     parser.add_argument("-j", "--workers", type=int, default=1)
     _add_random_order(parser)
+    parser.add_argument(
+        "-O", "--overwrite", type=bool, nargs="?", default=False, const=True,
+        help="Overwrite existing rendered tiles",
+    )
 
     parser = subparsers.add_parser("show-paths")
     parser.set_defaults(command="show_paths")

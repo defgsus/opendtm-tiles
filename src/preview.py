@@ -46,12 +46,15 @@ def command_preview(
 
         try:
             data = np.load(filename).get("arr_0")
+        except KeyboardInterrupt:
+            raise
         except:
             if resolution is None:
                 raise
             data = np.zeros((resolution, resolution, *array.shape[2:]))
             if data.ndim == 3:
                 data[..., 0] = 1
+
         if resolution is None:
             resolution = data.shape[0]
         if array is None:
@@ -78,7 +81,8 @@ def command_preview(
         array = array * .5 + .5
         array = np.pad(array, ((0, 0), (0, 0), (0, 1)))
     else:
-        array /= 2000  # TODO: get max height in dataset
+        #array /= 2000  # TODO: get max height in dataset
+        array = (1. - np.abs(.5 - array % 1.)*10.).clip(0, 1)
         array = array[..., None].repeat(4, -1)
 
     array[..., 3] = 1. - nan_mask

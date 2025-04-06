@@ -8,8 +8,6 @@ import numpy as np
 import cv2
 import PIL.Image
 
-from .opendtm import OpenDTM
-from . import config
 from .files import PathConfig, DeleteFileOnException, split_tile_file_map
 
 
@@ -18,6 +16,7 @@ def command_downsample(
         modality: str,
         zoom: List[int],
         workers: int,
+        overwrite: bool,
         verbose: bool,
 ):
     if len(zoom) == 1:
@@ -34,10 +33,11 @@ def command_downsample(
             pathconfig=pathconfig,
             zoom=zoom,
             verbose=verbose,
+            overwrite=overwrite,
         )
 
-        if workers <= 1:
-            _downsample_level(tiles_map=downsampled_map, **kwargs)
+        if workers <= 1 or len(downsampled_map) < workers*10:
+            _downsample_level(downsampled_map=downsampled_map, **kwargs)
         else:
             downsampled_map_batches = split_tile_file_map(downsampled_map, workers)
             with Pool(workers) as pool:
@@ -45,7 +45,7 @@ def command_downsample(
                     _downsample_level_kwargs,
                     [
                         {
-                            "tiles_map": downsampled_batch,
+                            "downsampled_map": downsampled_batch,
                             "tqdm_position": i,
                             **kwargs,
                         }
@@ -60,13 +60,13 @@ def _downsample_level_kwargs(kwargs: dict):
 def _downsample_level(
         downsampled_map,
         modality: str,
-        normal: bool,
         pathconfig: PathConfig,
         zoom: int,
         verbose: bool,
+        overwrite: bool,
         tqdm_position: int = 0,
 ):
-    progress = tqdm(downsampled_map.items(), desc="tiles", disable=not verbose, position=tqdm_position)
+    progress = tqdm(downsampled_map.items(), desc=f"downsampling {zoom}->{zoom-1}", disable=not verbose, position=tqdm_position)
     num_incomplete = 0
     num_skipped = 0
     for (x0, y0), up_tiles in progress:
@@ -75,29 +75,29 @@ def _downsample_level(
         if len(up_tiles) != 2:
             num_incomplete += 1
 
-        if pathconfig.output_tile_exists(zoom, x, y, modality=modality):
+        if not overwrite and pathconfig.tile_output_exists(zoom - 1, x0, y0, modality=modality):
             num_skipped += 1
+            continue
 
         tile = None
         for (x, y) in up_tiles:
-            up_tile = pathconfig.load_tile_output_file(zoom + 1, x, y)
+            up_tile = pathconfig.load_tile_output_file(zoom, x, y, modality=modality)
             if tile is None:
                 tile = PIL.Image.new(
                     mode=up_tile.mode,
                     size=(up_tile.width * 2, up_tile.height * 2),
                     color=(0,) * len(up_tile.mode),
                 )
+            tile.paste(up_tile, ((x - x0*2) * up_tile.width, (y - y0*2) * up_tile.height))
 
-            tile.paste(up_tile, (x - x0) * up_tile.width, (y - y0) * up_tile.height)
-
-        tile = tile.resize((up_tile.width // 2, up_tile.height // 2), PIL.Image.Resampling.BICUBIC)
-        pathconfig.save_output_tile(zoom, x, y, tile, modality=modality)
+        tile = tile.resize((up_tile.width, up_tile.height), PIL.Image.Resampling.BICUBIC)
+        pathconfig.save_output_tile(zoom - 1, x0, y0, tile, modality=modality)
 
 
 
 def _get_downsampled_tiles_map(tiles_map):
     downsampled_map = {}
-    for (x, y), file in tiles_map:
+    for (x, y), file in tiles_map.items():
         key = (x // 2, y // 2)
         if key not in downsampled_map:
             downsampled_map[key] = []

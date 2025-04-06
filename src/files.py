@@ -52,7 +52,7 @@ class PathConfig:
         filename = self.tile_cache_filename(z, x, y, modality=modality)
         return np.load(filename).get("arr_0")
 
-    def output_tile_exists(self, z: int, x: int, y: int, modality: str = "height") -> bool:
+    def tile_output_exists(self, z: int, x: int, y: int, modality: str = "height") -> bool:
         return self.tile_output_filename(z, x, y, modality=modality).exists()
 
     def tile_output_file_map(self, zoom: int, modality: str = "height"):
@@ -118,15 +118,38 @@ def get_tile_file_map(
 
     return dic
 
+
 def split_tile_file_map(
         tile_map: Dict[Tuple[int, int], Any],
         workers: int,
 ) -> List[Dict[Tuple[int, int], Any]]:
-    keys = list(tile_map.keys())
+
+    min_x = min(t[0] for t in tile_map)
+    min_y = min(t[1] for t in tile_map)
+    max_x = max(t[0] for t in tile_map)
+    max_y = max(t[1] for t in tile_map)
+
+    w, h = max_x - min_x, max_y - min_y
+    ws, hs = w // workers, h // workers
+
+    spatial_batches = {}
+    for x, y in tile_map:
+        key = ((x - min_x) // ws, (y - min_y) // hs)
+        if key not in spatial_batches:
+            spatial_batches[key] = []
+        spatial_batches[key].append((x, y))
+
     key_batches = []
-    batch_size = len(keys) // workers
-    for i in range(workers):
-        key_batches.append(keys[i * batch_size: (i + 1) * batch_size])
+    for batch in spatial_batches.values():
+        if len(key_batches) < 4:
+            key_batches.append(batch)
+        else:
+            shortest, shortest_key_batch = None, None
+            for key_batch in key_batches:
+                l = len(key_batch)
+                if shortest is None or l < shortest:
+                    shortest, shortest_key_batch = l, key_batch
+            shortest_key_batch.extend(batch)
 
     return [
         {key: tile_map[key] for key in key_batch}
