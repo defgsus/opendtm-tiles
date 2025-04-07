@@ -1,3 +1,4 @@
+import math
 import os
 import shutil
 import warnings
@@ -86,8 +87,9 @@ def command_reproject(
                 continue
 
             transformer = rasterio.transform.AffineTransformer(
+                ds.transform
                 # the sectors seem to be a little too small??
-                ds.transform * rasterio.Affine.scale(40_000/39_995)
+                #* rasterio.Affine.scale(40_000/39_993)
             )
             for tile in tqdm(tiles, position=1, desc="tiles", disable=not verbose):
                 tile_bounds_3857 = mercantile.xy_bounds(*tile)
@@ -115,13 +117,20 @@ def command_reproject(
                 l, b, r, t = p_extent
                 src = np.float32([[pbl[0]-l, pbl[1]-b], [pbr[0]-l, pbr[1]-b], [ptl[0]-l, ptl[1]-b], [ptr[0]-l, ptr[1]-b]])
                 dst = np.float32([[0, 0], [r - l, 0], [0, t - b + 1], [r - l + 1, t - b]])
-                src *= [[data.shape[1] / window.width , data.shape[0] / window.height]]
-                dst *= [[data.shape[1] / window.width , data.shape[0] / window.height]]
+                src *= [[data.shape[1] / window.width, data.shape[0] / window.height]]
+                dst *= [[data.shape[1] / window.width, data.shape[0] / window.height]]
+                # try to fix the edges
+                src = np.float32([
+                    [math.ceil(src[0][0]), math.ceil(src[0][1])],
+                    [math.floor(src[1][0]), math.ceil(src[1][1])],
+                    [math.ceil(src[2][0]), math.floor(src[2][1])],
+                    [math.floor(src[3][0]), math.floor(src[3][1])],
+                ])
 
                 mat = cv2.getPerspectiveTransform(src=src, dst=dst)
                 data = cv2.warpPerspective(
                     data, mat, (data.shape[1], data.shape[0]),
-                    flags=cv2.INTER_NEAREST,
+                    flags=cv2.INTER_LINEAR,
                 )
 
                 data = cv2.resize(data, (resolution, resolution), cv2.INTER_CUBIC)

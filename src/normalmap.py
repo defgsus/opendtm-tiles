@@ -1,184 +1,120 @@
-import os
-import warnings
-from multiprocessing.pool import ThreadPool as Pool
 from typing import List, Tuple, Optional
 
 from tqdm import tqdm
 import numpy as np
 import cv2
 
-from . import config
-from .files import DeleteFileOnException, get_tile_file_map, PathConfig, MemoryCache, split_tile_file_map
+from .files import PathConfig, MemoryCache
 
 
-def command_normal_map(
-        pathconfig: PathConfig,
-        zoom: int,
-        edge_cache_size: int,
-        tile_cache_size: int,
-        approximate: bool,
-        overwrite: bool,
-        workers: int,
-        verbose: bool,
-        eps: float = 0.000001,
-):
-    tiles_map = pathconfig.tile_cache_file_map(zoom=zoom)
-    if not tiles_map:
-        print(f"No reprojected tiles at {pathconfig.tile_cache_path()}")
+class NormalMapper:
 
-    kwargs = dict(
-        pathconfig=pathconfig,
-        zoom=zoom,
-        edge_cache_size=edge_cache_size,
-        tile_cache_size=tile_cache_size,
-        approximate=approximate,
-        overwrite=overwrite,
-        verbose=verbose,
-        eps=eps,
-    )
-    if workers <= 1:
-        return _normal_map(tiles_map=tiles_map, **kwargs)
-    else:
-        tiles_map_batches = split_tile_file_map(tiles_map, workers)
-        with Pool(workers) as pool:
-            pool.map(
-                _normal_map_kwargs,
-                [
-                    {
-                        "tiles_map": tiles_batch,
-                        "tqdm_position": i,
-                        **kwargs,
-                    }
-                    for i, tiles_batch in enumerate(tiles_map_batches)
-                ]
-            )
+    def __init__(
+            self,
+            pathconfig: PathConfig,
+            zoom: int,
+            edge_cache_size: int,
+            tile_cache_size: int,
+            approximate: bool,
+            eps: float = 0.000001,
+    ):
+        self.pathconfig = pathconfig
+        self.zoom = zoom
+        self.edge_cache = MemoryCache(max_items=edge_cache_size)
+        self.tile_cache = MemoryCache(max_items=tile_cache_size)
+        self.eps = eps
+        self.approximate = approximate
+        self.num_edges_approximated = 0
 
-
-
-def _normal_map_kwargs(
-        kwargs: dict
-):
-    return _normal_map(**kwargs)
-
-
-def _normal_map(
-        tiles_map,
-        pathconfig: PathConfig,
-        zoom: int,
-        edge_cache_size: int,
-        tile_cache_size: int,
-        approximate: bool,
-        overwrite: bool,
-        verbose: bool,
-        eps: float = 0.000001,
-        tqdm_position: int = 0,
-):
-    edge_cache = MemoryCache(max_items=edge_cache_size)
-    tile_cache = MemoryCache(max_items=tile_cache_size)
-
-    def _cache_edges(x: int, y: int, data: np.ndarray):
+    def cache_edges(self, x: int, y: int, data: np.ndarray):
         for name, edge in (
                 ("left", data[:, :1]),
                 ("right", data[:, -1:]),
                 ("bottom", data[:1]),
                 ("top", data[-1:]),
         ):
-            edge_cache.put((x, y, name), edge)
+            self.edge_cache.put((x, y, name), edge)
 
-    def _get_tile(x: int, y: int) -> Optional[np.ndarray]:
-        tile = tile_cache.get((x, y))
+    def get_tile(self, x: int, y: int) -> Optional[np.ndarray]:
+        tile = self.tile_cache.get((x, y))
         if tile is False:
             return None
         if tile is None:
-            if not pathconfig.tile_cache_file_exists(zoom, x, y):
+            if not self.pathconfig.tile_cache_file_exists(self.zoom, x, y):
                 tile = False
             else:
-                tile = pathconfig.load_tile_cache_file(zoom, x, y)
-                _cache_edges(x, y, tile)
-            tile_cache.put((x, y), tile)
+                tile = self.pathconfig.load_tile_cache_file(self.zoom, x, y)
+                self.cache_edges(x, y, tile)
+            self.tile_cache.put((x, y), tile)
         return None if tile is False else tile
 
-    def _get_edge(x: int, y: int, name: str) -> Optional[np.ndarray]:
-        if approximate:
+    def get_edge(self, x: int, y: int, name: str) -> Optional[np.ndarray]:
+        if self.approximate:
             return None
-        edge = edge_cache.get((x, y, name))
+        edge = self.edge_cache.get((x, y, name))
         if edge is False:
             edge = None
         elif edge is None:
-            tile = _get_tile(x, y)
+            tile = self.get_tile(x, y)
             if tile is None:
-                edge_cache.put((x, y, name), False)
+                self.edge_cache.put((x, y, name), False)
                 edge = None
             else:
-                edge = edge_cache.get((x, y, name))
+                edge = self.edge_cache.get((x, y, name))
 
         #if edge is None and not approximate:
         #    warnings.warn(f"Approximating {name} edge of tile {zoom}/{x}/{y}")
         return edge
 
-    num_skipped = 0
-    num_edges_approximated = 0
-    progress = tqdm(tiles_map.items(), desc="tiles", disable=not verbose, position=tqdm_position)
-    for (x, y), filename in progress:
+    def normal_map(self, x: int, y: int) -> np.ndarray:
 
-        if pathconfig.tile_cache_file_exists(zoom, x, y, modality="normal") and not overwrite:
-            num_skipped += 1
+        tile = self.get_tile(x, y)
 
-        else:
-            tile = _get_tile(x, y)
+        left = self.get_edge(x - 1, y, "right")
+        right = self.get_edge(x + 1, y, "left")
+        bottom = self.get_edge(x, y - 1, "top")
+        top = self.get_edge(x, y + 1, "bottom")
 
-            left = _get_edge(x - 1, y, "right")
-            right = _get_edge(x + 1, y, "left")
-            bottom = _get_edge(x, y - 1, "top")
-            top = _get_edge(x, y + 1, "bottom")
+        if left is None:
+            self.num_edges_approximated += 1
+            left = tile[:, :1] * 2 - tile[:, 1:2]
+        if right is None:
+            self.num_edges_approximated += 1
+            right = tile[:, -1:] * 2 - tile[:, -2:-1]
+        if bottom is None:
+            self.num_edges_approximated += 1
+            bottom = tile[:1] * 2 - tile[1:2]
+        if top is None:
+            self.num_edges_approximated += 1
+            top = tile[-1:] * 2 - tile[-2:-1]
 
-            if left is None:
-                num_edges_approximated += 1
-                left = tile[:, :1] * 2 - tile[:, 1:2]
-            if right is None:
-                num_edges_approximated += 1
-                right = tile[:, -1:] * 2 - tile[:, -2:-1]
-            if bottom is None:
-                num_edges_approximated += 1
-                bottom = tile[:1] * 2 - tile[1:2]
-            if top is None:
-                num_edges_approximated += 1
-                top = tile[-1:] * 2 - tile[-2:-1]
+        bottom = np.pad(bottom, ((0, 0), (1, 1)))
+        top = np.pad(top, ((0, 0), (1, 1)))
 
-            bottom = np.pad(bottom, ((0, 0), (1, 1)))
-            top = np.pad(top, ((0, 0), (1, 1)))
+        tile = np.concat([left, tile, right], 1)
+        tile = np.concat([bottom, tile, top], 0)
 
-            tile = np.concat([left, tile, right], 1)
-            tile = np.concat([bottom, tile, top], 0)
+        # TODO this does not account for window in DTM sector
+        #   z_factor = 2 * tile.shape[0] / 40_000
+        #   so currently assume 1:1 reprojection
+        z_factor = 2
 
-            # TODO this does not account for window in DTM sector
-            z_factor = 2 * tile.shape[0] / 40_000
-            z_factor = 2
+        tile = np.concat(
+            [
+                (tile[2:,   1:-1] - tile[ :-2, 1:-1])[..., None],
+                (tile[1:-1,  :-2] - tile[1:-1, 2:  ])[..., None],
+                np.ones((tile.shape[0] - 2, tile.shape[1] - 2, 1)) * z_factor,
+            ],
+            axis=-1,
+        )
+        tile /= np.linalg.norm(tile, axis=2, keepdims=True) + self.eps
 
-            tile = np.concat(
-                [
-                    (tile[2:,   1:-1] - tile[ :-2, 1:-1])[..., None],
-                    (tile[1:-1,  :-2] - tile[1:-1, 2:  ])[..., None],
-                    np.ones((tile.shape[0] - 2, tile.shape[1] - 2, 1)) * z_factor,
-                ],
-                axis=-1,
-            )
-            tile /= np.linalg.norm(tile, axis=2, keepdims=True) + eps
+        return tile
 
-            pathconfig.save_tile_cache_file(zoom, x, y, tile, modality="normal")
+    def stats(self) -> dict:
+        return {
+            "edge_hits/misses": f"{self.edge_cache.num_hits}/{self.edge_cache.num_misses}",
+            "tile_hits/misses": f"{self.tile_cache.num_hits}/{self.tile_cache.num_misses}",
+            "approxed_edges": self.num_edges_approximated,
+        }
 
-        progress.set_postfix({
-            "skipped": num_skipped,
-            "edge_hits/misses": f"{edge_cache.num_hits}/{edge_cache.num_misses}",
-            "tile_hits/misses": f"{tile_cache.num_hits}/{tile_cache.num_misses}",
-            "approxed_edges": num_edges_approximated,
-        })
-
-    return {
-        "skipped": num_skipped,
-        "edge_hits": edge_cache.num_hits,
-        "edge_misses": edge_cache.num_misses,
-        "tile_hits": tile_cache.num_hits,
-        "tile_misses": tile_cache.num_misses,
-        "approximated_edges": num_edges_approximated,
-    }

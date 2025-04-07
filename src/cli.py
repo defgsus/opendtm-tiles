@@ -8,7 +8,6 @@ from src.opendtm import OpenDTM
 from src.files import PathConfig
 from src.reproject import command_reproject, command_show_resolution
 from src.preview import command_preview
-from src.normalmap import command_normal_map
 from src.rendertiles import command_render
 from src.downsample import command_downsample
 
@@ -27,21 +26,21 @@ def parse_args() -> dict:
 
     def _add_sector_args(parser: argparse.ArgumentParser):
         parser.add_argument(
-            "-x", "--sector-x", type=int, nargs="+", default=config.OPENDTM_SECTOR_X,
+            "-sx", "--sector-x", type=int, nargs="+", default=config.OPENDTM_SECTOR_X,
             help=f"Sector west->east extent to consider, default is {config.OPENDTM_SECTOR_X}",
         )
         parser.add_argument(
-            "-y", "--sector-y", type=int, nargs="+", default=config.OPENDTM_SECTOR_Y,
+            "-sy", "--sector-y", type=int, nargs="+", default=config.OPENDTM_SECTOR_Y,
             help=f"Sector north->south extent to consider, default is {config.OPENDTM_SECTOR_Y}",
         )
 
-    def _add_tile_args(parser: argparse.ArgumentParser, prefix: str = ""):
+    def _add_tile_args(parser: argparse.ArgumentParser):
         parser.add_argument(
-            f"-{prefix}x", "--tile-x", type=int, nargs="+", default=None,
+            "-x", "--tile-x", type=int, nargs="+", default=None,
             help=f"Tile x extent to consider, two numbers for a range",
         )
         parser.add_argument(
-            f"-{prefix}y", "--tile-y", type=int, nargs="+", default=None,
+            "-y", "--tile-y", type=int, nargs="+", default=None,
             help=f"Tile y extent to consider, two numbers for a range",
         )
 
@@ -58,6 +57,14 @@ def parse_args() -> dict:
             help="Set the modality to preview, render or downsample",
         )
 
+    def _add_normal_args(parser: argparse.ArgumentParser):
+        parser.add_argument("-tcs", "--tile-cache-size", type=int, default=1)
+        parser.add_argument("-ecs", "--edge-cache-size", type=int, default=10_000)
+        parser.add_argument(
+            "-a", "--approximate", type=bool, nargs="?", default=False, const=True,
+            help="Approximate edges for normal mapping, instead of loading the neighbour tiles",
+        )
+
     parser = subparsers.add_parser("cache")
     parser.set_defaults(command="cache")
     _add_sector_args(parser)
@@ -65,30 +72,13 @@ def parse_args() -> dict:
     parser = subparsers.add_parser("reproject")
     parser.set_defaults(command="reproject")
     _add_sector_args(parser)
-    _add_tile_args(parser, prefix="t")
+    _add_tile_args(parser)
     parser.add_argument("-r", "--resolution", type=int, default=256)
     parser.add_argument("-z", "--zoom", type=int, default=10)
     parser.add_argument(
         "-R", "--reset", type=bool, nargs="?", default=False, const=True,
         help="Delete the tile cache directory for that zoom level before sampling reprojections",
     )
-
-    parser = subparsers.add_parser("normal-map")
-    parser.set_defaults(command="normal_map")
-    parser.add_argument("-z", "--zoom", type=int, default=10)
-    _add_tile_args(parser)
-    _add_random_order(parser)
-    parser.add_argument("-tcs", "--tile-cache-size", type=int, default=1)
-    parser.add_argument("-ecs", "--edge-cache-size", type=int, default=10_000)
-    parser.add_argument(
-        "-a", "--approximate", type=bool, nargs="?", default=False, const=True,
-        help="Approximate edges instead of loading the tiles",
-    )
-    parser.add_argument(
-        "-O", "--overwrite", type=bool, nargs="?", default=False, const=True,
-        help="Overwrite existing normal map tiles",
-    )
-    parser.add_argument("-j", "--workers", type=int, default=1)
 
     parser = subparsers.add_parser(
         "preview",
@@ -99,6 +89,7 @@ def parse_args() -> dict:
     parser.add_argument("-z", "--zoom", type=int, default=10)
     parser.add_argument("-r", "--resolution", type=int, default=None, help="resolution per tile in preview")
     parser.add_argument("-p", "--padding", type=int, default=1, help="padding between tiles")
+    _add_normal_args(parser)
     parser.add_argument(
         "-n", "--numbers", type=bool, nargs="?", default=False, const=True,
         help="Just print the numbers of the grid",
@@ -115,6 +106,7 @@ def parse_args() -> dict:
     parser.add_argument("-z", "--cache-zoom", type=int, default=10)
     parser.add_argument("-tz", "--tile-zoom", type=int, default=None)
     parser.add_argument("-r", "--resolution", type=int, default=None, help="resolution per tile in tile-zoom")
+    _add_normal_args(parser)
     parser.add_argument("-j", "--workers", type=int, default=1)
     _add_random_order(parser)
     parser.add_argument(

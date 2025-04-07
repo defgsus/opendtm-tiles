@@ -10,8 +10,8 @@ import numpy as np
 import cv2
 import PIL.Image
 
-from . import config
 from .files import PathConfig, DeleteFileOnException, split_tile_file_map
+from .normalmap import NormalMapper
 
 
 def command_render(
@@ -20,6 +20,9 @@ def command_render(
         cache_zoom: int,
         tile_zoom: Optional[int],
         resolution: Optional[int],
+        edge_cache_size: int,
+        tile_cache_size: int,
+        approximate: bool,
         workers: int,
         overwrite: bool,
         verbose: bool,
@@ -30,10 +33,17 @@ def command_render(
         cache_zoom=cache_zoom,
         tile_zoom=tile_zoom,
         resolution=resolution,
+        edge_cache_size=edge_cache_size,
+        tile_cache_size=tile_cache_size,
+        approximate=approximate,
         overwrite=overwrite,
         verbose=verbose,
     )
-    tiles_map = pathconfig.tile_cache_file_map(zoom=cache_zoom, modality=modality)
+    tiles_map = pathconfig.tile_cache_file_map(zoom=cache_zoom)
+
+    if not tiles_map and verbose:
+        print("No tiles found")
+        return
 
     if workers <= 1:
         _render_tiles(tiles_map=tiles_map, **kwargs)
@@ -64,6 +74,9 @@ def _render_tiles(
         tile_zoom: Optional[int],
         resolution: Optional[int],
         overwrite: bool,
+        edge_cache_size: int,
+        tile_cache_size: int,
+        approximate: bool,
         verbose: bool,
         interpolation: int = cv2.INTER_CUBIC,
         tqdm_position: int = 0,
@@ -72,8 +85,24 @@ def _render_tiles(
         tile_zoom = cache_zoom
 
     progress = tqdm(tiles_map.items(), desc="tiles", disable=not verbose, position=tqdm_position)
+    normal_mapper = None if modality != "normal" else NormalMapper(
+        pathconfig=pathconfig,
+        zoom=cache_zoom,
+        edge_cache_size=edge_cache_size,
+        tile_cache_size=tile_cache_size,
+        approximate=approximate,
+    )
+
+    def _get_cache_tile(x, y):
+        if modality == "height":
+            return pathconfig.load_tile_cache_file(cache_zoom, x, y, modality=modality)
+        elif modality == "normal":
+            return normal_mapper.normal_map(x, y)
+
+    num_skipped = 0
 
     def _iter_tiles(resolution: Optional[int]):
+        nonlocal num_skipped
         data_resolution = None
         for (x, y), filename in progress:
             source_tile = mercantile.Tile(x, y, cache_zoom)
@@ -81,7 +110,7 @@ def _render_tiles(
             data = None
             if data_resolution is None:
                 try:
-                    data = pathconfig.load_tile_cache_file(cache_zoom, x, y, modality=modality)
+                    data = _get_cache_tile(x, y)
                 except Exception as e:
                     warnings.warn(f"{type(e).__name__}: {e}: {pathconfig.tile_cache_filename(cache_zoom, x, y, modality=modality)}")
                     continue
@@ -120,6 +149,9 @@ def _render_tiles(
                         do_it = True
                         break
 
+                if not do_it:
+                    num_skipped += len(tiles_and_slices)
+
             if do_it:
                 if pathconfig.tile_range_x:
                     tiles_and_slices = [
@@ -136,7 +168,7 @@ def _render_tiles(
 
                 if data is None:
                     try:
-                        data = pathconfig.load_tile_cache_file(cache_zoom, x, y, modality=modality)
+                        data = _get_cache_tile(x, y)
                     except Exception as e:
                         warnings.warn(f"{type(e).__name__}: {e}: {pathconfig.tile_cache_filename(cache_zoom, x, y, modality=modality)}")
                         continue
@@ -153,7 +185,6 @@ def _render_tiles(
                         )
                     yield source_tile, tile, data_slice
 
-    num_skipped = 0
     for source_tile, tile, array in _iter_tiles(resolution):
 
         if not overwrite and pathconfig.tile_output_exists(tile.z, tile.x, tile.y, modality=modality):
@@ -167,8 +198,9 @@ def _render_tiles(
         nan_mask = np.isnan(array2d) | (array2d <= -10_000)
 
         progress.set_postfix({
-            "num_skipped": num_skipped,
-            "tile": f"{source_tile.z}/{source_tile.x}/{source_tile.y}->{tile.z}/{tile.x}/{tile.y}",
+            **({"num_skipped": num_skipped} if not overwrite else {}),
+            **(normal_mapper.stats() if normal_mapper is not None else {}),
+            #"tile": f"{source_tile.z}/{source_tile.x}/{source_tile.y}->{tile.z}/{tile.x}/{tile.y}",
             "filled": f"{round(float((1.-nan_mask.mean())*100), 1)}%",
         })
 

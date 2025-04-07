@@ -7,9 +7,8 @@ import numpy as np
 import cv2
 import PIL.Image
 
-from .opendtm import OpenDTM
-from . import config
 from .files import PathConfig, DeleteFileOnException
+from .normalmap import NormalMapper
 
 
 def command_preview(
@@ -18,10 +17,13 @@ def command_preview(
         zoom: int,
         resolution: Optional[int],
         padding: int,
+        edge_cache_size: int,
+        tile_cache_size: int,
+        approximate: bool,
         numbers: bool,
         verbose: bool,
 ):
-    tiles_map = pathconfig.tile_cache_file_map(zoom=zoom, modality=modality)
+    tiles_map = pathconfig.tile_cache_file_map(zoom=zoom)
 
     if not tiles_map:
         print(f"No tiles at {pathconfig.tile_cache_path(modality=modality)}/{zoom}")
@@ -32,20 +34,35 @@ def command_preview(
     max_x = max(t[0] for t in tiles_map)
     max_y = max(t[1] for t in tiles_map)
 
-    if numbers:
+    if numbers or verbose:
         print(f"z={zoom}")
         print(f"x={(min_x, max_x)} width={max_x - min_x}")
         print(f"y={(min_y, max_y)} height={max_y - min_y}")
-        return
+        if numbers:
+            return
+
+    normal_mapper = None if modality != "normal" else NormalMapper(
+        pathconfig=pathconfig,
+        zoom=zoom,
+        edge_cache_size=edge_cache_size,
+        tile_cache_size=tile_cache_size,
+        approximate=approximate,
+    )
+
+    def _get_cache_tile(x, y):
+        if modality == "height":
+            return pathconfig.load_tile_cache_file(zoom, x, y, modality=modality)
+        elif modality == "normal":
+            return normal_mapper.normal_map(x, y)
 
     array = None
     small_res = resolution
-    for (x, y), filename in tqdm(tiles_map.items(), desc="tiles", disable=not verbose):
-        x = x - min_x
-        y = y - min_y
+    for (tx, ty), filename in tqdm(tiles_map.items(), desc="tiles", disable=not verbose):
+        x = tx - min_x
+        y = ty - min_y
 
         try:
-            data = np.load(filename).get("arr_0")
+            data = _get_cache_tile(tx, ty)
         except KeyboardInterrupt:
             raise
         except:
@@ -81,8 +98,8 @@ def command_preview(
         array = array * .5 + .5
         array = np.pad(array, ((0, 0), (0, 0), (0, 1)))
     else:
-        #array /= 2000  # TODO: get max height in dataset
-        array = (1. - np.abs(.5 - array % 1.)*10.).clip(0, 1)
+        array /= 2000  # TODO: get max height in dataset
+        #array = (1. - np.abs(.5 - array % 1.)*10.).clip(0, 1)
         array = array[..., None].repeat(4, -1)
 
     array[..., 3] = 1. - nan_mask

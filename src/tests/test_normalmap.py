@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 
 from src.files import PathConfig
-from src.normalmap import command_normal_map
+from src.rendertiles import command_render
 
 
 class MockPathConfig(PathConfig):
@@ -69,17 +69,20 @@ class TestNormalMapping(unittest.TestCase):
                 pathconfig.save_tile_cache_file(zoom, 1000+x, 1000+y, np.zeros((res, res)))
         pathconfig.statements.clear()
 
-        stats = command_normal_map(
+        command_render(
             pathconfig=pathconfig,
-            zoom=16,
+            modality="normal",
+            cache_zoom=16,
+            tile_zoom=16,
+            resolution=res,
             edge_cache_size=1000,
             tile_cache_size=1000,
             approximate=False,
-            overwrite=False,
+            overwrite=True,
             workers=1,
             verbose=False,
         )
-        # pathconfig.dump_statements()
+        #pathconfig.dump_statements()
 
         self.assertEqual(
             [
@@ -88,28 +91,24 @@ class TestNormalMapping(unittest.TestCase):
                 # get edges of neighbours
                 ("load_tile_cache_file", {'z': 16, 'x': 1001, 'y': 1000, 'modality': 'height'}),
                 ("load_tile_cache_file", {'z': 16, 'x': 1000, 'y': 1001, 'modality': 'height'}),
-                ("save_tile_cache_file", {'z': 16, 'x': 1000, 'y': 1000, 'array': (32, 32, 3), 'modality': 'height'}),
+                ("save_output_tile", {'z': 16, 'x': 1000, 'y': 1000, 'array': (32, 32, 4), 'modality': 'height'}),
                 # next tile 1000, 1001, load neighbours
                 ("load_tile_cache_file", {'z': 16, 'x': 1001, 'y': 1001, 'modality': 'height'}),
                 ("load_tile_cache_file", {'z': 16, 'x': 1000, 'y': 1002, 'modality': 'height'}),
-                ("save_tile_cache_file", {'z': 16, 'x': 1000, 'y': 1001, 'array': (32, 32, 3), 'modality': 'height'}),
+                ("save_output_tile", {'z': 16, 'x': 1000, 'y': 1001, 'array': (32, 32, 4), 'modality': 'height'}),
                 # tile 1002, 1002, load neighbour (others are in cache)
                 ("load_tile_cache_file", {'z': 16, 'x': 1001, 'y': 1002, 'modality': 'height'}),
-                ("save_tile_cache_file", {'z': 16, 'x': 1000, 'y': 1002, 'array': (32, 32, 3), 'modality': 'height'}),
+                ("save_output_tile", {'z': 16, 'x': 1000, 'y': 1002, 'array': (32, 32, 4), 'modality': 'height'}),
                 # aso...
                 ("load_tile_cache_file", {'z': 16, 'x': 1002, 'y': 1000, 'modality': 'height'}),
-                ("save_tile_cache_file", {'z': 16, 'x': 1001, 'y': 1000, 'array': (32, 32, 3), 'modality': 'height'}),
+                ("save_output_tile", {'z': 16, 'x': 1001, 'y': 1000, 'array': (32, 32, 4), 'modality': 'height'}),
                 ("load_tile_cache_file", {'z': 16, 'x': 1002, 'y': 1001, 'modality': 'height'}),
-                ("save_tile_cache_file", {'z': 16, 'x': 1001, 'y': 1001, 'array': (32, 32, 3), 'modality': 'height'}),
+                ("save_output_tile", {'z': 16, 'x': 1001, 'y': 1001, 'array': (32, 32, 4), 'modality': 'height'}),
                 ("load_tile_cache_file", {'z': 16, 'x': 1002, 'y': 1002, 'modality': 'height'}),
-                ("save_tile_cache_file", {'z': 16, 'x': 1001, 'y': 1002, 'array': (32, 32, 3), 'modality': 'height'}),
-                ("save_tile_cache_file", {'z': 16, 'x': 1002, 'y': 1000, 'array': (32, 32, 3), 'modality': 'height'}),
-                ("save_tile_cache_file", {'z': 16, 'x': 1002, 'y': 1001, 'array': (32, 32, 3), 'modality': 'height'}),
-                ("save_tile_cache_file", {'z': 16, 'x': 1002, 'y': 1002, 'array': (32, 32, 3), 'modality': 'height'}),
+                ("save_output_tile", {'z': 16, 'x': 1001, 'y': 1002, 'array': (32, 32, 4), 'modality': 'height'}),
+                ("save_output_tile", {'z': 16, 'x': 1002, 'y': 1000, 'array': (32, 32, 4), 'modality': 'height'}),
+                ("save_output_tile", {'z': 16, 'x': 1002, 'y': 1001, 'array': (32, 32, 4), 'modality': 'height'}),
+                ("save_output_tile", {'z': 16, 'x': 1002, 'y': 1002, 'array': (32, 32, 4), 'modality': 'height'}),
             ],
             pathconfig.statements,
-        )
-        self.assertEqual(
-            {'skipped': 0, 'edge_hits': 24, 'edge_misses': 0, 'tile_hits': 8, 'tile_misses': 0, 'approximated_edges': 12},
-            stats,
         )

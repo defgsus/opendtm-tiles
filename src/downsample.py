@@ -1,4 +1,5 @@
 import os
+import warnings
 from pathlib import Path
 from multiprocessing.pool import ThreadPool as Pool
 from typing import List, Tuple, Optional
@@ -80,15 +81,27 @@ def _downsample_level(
             continue
 
         tile = None
+        num_pasted = 0
         for (x, y) in up_tiles:
-            up_tile = pathconfig.load_tile_output_file(zoom, x, y, modality=modality)
+            try:
+                up_tile = pathconfig.load_tile_output_file(zoom, x, y, modality=modality)
+            except Exception as e:
+                warnings.warn(f"{type(e).__name__}: {e}: {pathconfig.tile_output_filename(zoom, x, y, modality=modality)}")
+                continue
             if tile is None:
                 tile = PIL.Image.new(
                     mode=up_tile.mode,
                     size=(up_tile.width * 2, up_tile.height * 2),
                     color=(0,) * len(up_tile.mode),
                 )
-            tile.paste(up_tile, ((x - x0*2) * up_tile.width, (y - y0*2) * up_tile.height))
+            try:
+                tile.paste(up_tile, ((x - x0*2) * up_tile.width, (y - y0*2) * up_tile.height))
+                num_pasted += 1
+            except Exception as e:
+                warnings.warn(f"{type(e).__name__}: {e}: {pathconfig.tile_output_filename(zoom, x, y, modality=modality)}")
+
+        if tile is None or not num_pasted:
+            continue
 
         tile = tile.resize((up_tile.width, up_tile.height), PIL.Image.Resampling.BICUBIC)
         pathconfig.save_output_tile(zoom - 1, x0, y0, tile, modality=modality)

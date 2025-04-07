@@ -64,8 +64,23 @@ The resolutions are minimum and maximum, since tile resolutions are a little dif
 
 Seems like it would be worth the trouble to go up to zoom level 17.
 
+```shell
+# download and extract 4 DTM sectors
+python src/cli.py cache -sx 640 680 -sy 5600 5640
+
+# reproject to map-tiles at zoom 17, picking the city of Jena which is at the crossing of four DTM sectors
+python src/cli.py reproject -z 17 -r 256 -sx 640 680 -sy 5600 5640 -x 69728 69785 -y 43900 43966
+# or at level 16
+# python src/cli.py reproject -z 16 -x 34864 34892 -y 21950 21983
+
+# render normal-maps of reprojected zoom-17 tiles to png
+python src/cli.py render -m normal -z 17 -j4
+
+# downsample to lower zoom levels
+python src/cli.py downsample -z 17 6 -m normal -j4
+```
 
 TODO: 
 
-- a gap in normal map at about 20/557441/351617, for reproject:13@3600²
-- alignment with map is not correct in the lower-right area of the OpenDTM slices
+- there seems to be a slight gap between sectors, of about 5 to 10 pixels
+- the edges of the reprojected tiles are not always smoothly fitting 
